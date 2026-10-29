@@ -1,0 +1,76 @@
+name: Laravel validation
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: laravel
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_DB: meda_test
+          POSTGRES_USER: meda
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U meda -d meda_test" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      APP_ENV: testing
+      APP_DEBUG: 'false'
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: meda_test
+      DB_USERNAME: meda
+      DB_PASSWORD: ci-only-password
+      DB_URL: ''
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+      BROADCAST_CONNECTION: 'null'
+      MEDA_MOCK_AUTH: 'true'
+      MEDA_MOCK_PAYMENTS: 'true'
+      MEDA_STAFF_MFA: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_pgsql, mbstring, intl, bcmath, zip, pcntl
+          tools: composer:v2
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: laravel/package-lock.json
+      - run: composer install --prefer-dist --no-interaction
+      - name: Prepare disposable test configuration
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php -r '$p=".env"; file_put_contents($p,preg_replace("/^MEDA_QR_KEY_V1=.*$/m","MEDA_QR_KEY_V1=".bin2hex(random_bytes(32)),file_get_contents($p)));'
+      - run: composer validate --strict
+      - run: composer audit
+      - run: npm ci
+      - run: npm audit
+      - run: npm run build
+      - run: php vendor/bin/phpunit --testdox
+      - run: php tests/concurrency.php
+      - run: php artisan view:cache
+      - run: php artisan route:cache
+      - run: php artisan schedule:list
+      - name: Build production images without starting public services
+        run: |
+          docker build -f Dockerfile.production --target app -t meda-app:test .
+          docker build -f Dockerfile.production --target web -t meda-web:test .

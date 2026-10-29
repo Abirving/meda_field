@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd" bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".phpunit.cache">
+  <testsuites><testsuite name="Meda Pass"><directory>tests</directory></testsuite></testsuites>
+  <source><include><directory>app</directory></include></source>
+  <php><env name="APP_ENV" value="testing"/><env name="DB_DATABASE" value="meda_test" force="true"/><env name="CACHE_PREFIX" value="meda_test_cache" force="true"/><env name="MEDA_MOCK_AUTH" value="true"/><env name="MEDA_MOCK_PAYMENTS" value="true"/><env name="MAIL_MAILER" value="log"/><env name="QUEUE_CONNECTION" value="sync"/><env name="BROADCAST_CONNECTION" value="null"/></php>
+</phpunit>

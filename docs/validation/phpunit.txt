@@ -1,0 +1,75 @@
+PHPUnit 11.5.57 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.6
+Configuration: /workspace/sites/turfpass-addis/laravel/phpunit.xml
+
+.......................................................           55 / 55 (100%)
+
+Time: 00:25.409, Memory: 77.00 MB
+
+Booking (Tests\Feature\Booking)
+ ✔ Slots include fifteen minute changeover
+ ✔ Same request returns same hold
+ ✔ Two users cannot hold the same slot
+ ✔ Credit is reserved and restored on expiry
+ ✔ Duplicate callback has one payment record
+ ✔ Amount mismatch never generates a pass
+ ✔ Late payment requires review and does not book
+ ✔ Cancellation is store credit and idempotent
+ ✔ Cancellation rejects exact two hour boundary
+ ✔ Gate pass is current assigned and single use
+ ✔ Woreda supervisor cannot edit other woredas
+ ✔ Postgres constraint rejects an overlap inside the buffer
+ ✔ Mock identity cannot set staff role
+ ✔ Unconfigured webhook cannot mark any payment paid
+
+Money (Tests\Unit\Money)
+ ✔ Money uses integer minor units
+ ✔ Excess precision is rejected
+
+Production Readiness (Tests\Feature\ProductionReadiness)
+ ✔ Availability checks overlap when grid moves
+ ✔ Calendar edits are blocked with future reservations
+ ✔ Field closure releases pending credit and late money enters review
+ ✔ Scheduled closure disrupts paid pass and resolves credit once
+ ✔ Failed then successful reference is reviewed without resurrecting pass
+ ✔ Success then failure quarantines pass
+ ✔ Customer cannot hoard more than two holds
+ ✔ Final buffer fits before closing
+ ✔ Weekly closed day has no slots
+ ✔ Repeated checkout reuses one durable order
+ ✔ Uncertain checkout is not reissued
+ ✔ Receipt replay has one financial effect
+ ✔ Old session is revoked when account disabled
+ ✔ Customer profile cannot promote role
+ ✔ Unverified contact cannot book
+ ✔ Last administrator cannot be disabled
+ ✔ Staff is challenged for second factor
+ ✔ Mfa enrollment and replay protection
+ ✔ Unapproved live fan entry is rejected
+ ✔ Customer cannot view another payment record
+ ✔ Order failure with another reference quarantines paid pass
+ ✔ Guest sign in preserves selected field and date
+ ✔ Email change removes verification and cannot change wallet
+ ✔ Staff recovery token resets password once and revokes sessions
+ ✔ Recovery message does not disclose accounts
+ ✔ Admin pages and customer views render
+ ✔ Admin can edit weekly hours and suspend customer without promoting them
+ ✔ Production refuses incomplete configuration
+
+Provider Security (Tests\Feature\ProviderSecurity)
+ ✔ Oidc authorization uses pkce and unique state
+ ✔ Oidc accepts signed identity and consumes state once
+ ✔ Oidc rejects wrong nonce issuer audience authorized party and expiry
+ ✔ Oidc rejects wrong signature
+ ✔ Oidc rejects missing wrong and expired state before network
+ ✔ Both explicit signature algorithms verify and reject tampering
+ ✔ Signed wrong merchant currency and missing reference are rejected
+ ✔ Ambiguous and unsigned payment payloads are rejected
+ ✔ H5 checkout posts a signed order and returns the configured host
+ ✔ Provider query cannot substitute another order
+
+Totp (Tests\Unit\Totp)
+ ✔ Rfc6238 sha1 vectors
+
+OK (55 tests, 167 assertions)

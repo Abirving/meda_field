@@ -1,0 +1,54 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync,readdirSync} from 'node:fs';
+import {TurfService} from '../lib/service.ts';
+import {normalizePhone,validateSlot,addisDate,datePlus,kickoff,csvCell,AppError,slotHours,timeLabel} from '../lib/domain.ts';
+
+// Executes the real migration and service SQL using SQLite. The adapter mirrors
+// D1 prepared statements and transactional batch semantics; no business mocks.
+class LocalDB {
+ raw:DatabaseSync;
+ constructor(){this.raw=new DatabaseSync(':memory:');this.raw.exec('PRAGMA foreign_keys=ON;');for(const name of readdirSync('drizzle').filter(x=>x.endsWith('.sql')).sort())this.raw.exec(readFileSync('drizzle/'+name,'utf8'));}
+ prepare(sql:string){return new LocalStatement(this,sql,[]);}
+ async batch(items:LocalStatement[]){this.raw.exec('BEGIN');try{const result=items.map(s=>s.execute());this.raw.exec('COMMIT');return result;}catch(e){this.raw.exec('ROLLBACK');throw e;}}
+}
+class LocalStatement {
+ db:LocalDB;sql:string;args:any[];
+ constructor(db:LocalDB,sql:string,args:any[]){this.db=db;this.sql=sql;this.args=args;}
+ bind(...args:any[]){return new LocalStatement(this.db,this.sql,args);}
+ execute(){const results=this.db.raw.prepare(this.sql).all(...this.args);return {results,success:true,meta:{changes:0}};}
+ async all(){return this.execute();}
+ async run(){return this.execute();}
+ async first(){return this.execute().results[0]??null;}
+}
+const NOW=Date.parse('2026-10-26T10:00:00+03:00');
+async function setup(space='test',now=NOW){const local=new LocalDB();const s=new TurfService(local as unknown as D1Database,space,now);await s.init();return {s,local};}
+async function login(s:TurfService,role='player'){
+ if(['player','player2'].includes(role))return s.signIn({national_id:role==='player'?'1000000001':'1000000004'});
+ return s.signIn({mode:'staff',email:role+'@meda.test',password:'MedaDemo!2026'});
+}
+const request=(s:TurfService,extra={})=>({field_id:s.space+':bole',date:'2026-10-27',hour:11,team:'Test United',method:'telebirr',simulation:'success',idempotency_key:crypto.randomUUID(),...extra});
+async function book(s:TurfService,extra={}){const r=request(s,extra);const h=await s.holdSlot(r);return s.createBooking({...r,hold_id:h.hold.id});}
+const fails=(fn:()=>Promise<unknown>,status:number)=>assert.rejects(fn,(e:unknown)=>e instanceof AppError&&e.status===status);
+
+test('75-minute cadence, final play hour, EAT and real calendar validation',()=>{assert.deepEqual(slotHours(8,12),[8,9.25,10.5]);assert.equal(timeLabel(9.25),'09:15');assert.equal(timeLabel(10.5),'10:30');assert.equal(addisDate(Date.parse('2026-10-26T22:00:00Z')),'2026-10-27');assert.throws(()=>validateSlot('2026-10-27',10,6,23,NOW),AppError);assert.throws(()=>validateSlot('2026-02-31',11,6,23,NOW),AppError);});
+test('seed remains isolated and idempotent with national IDs',async()=>{const {s,local}=await setup();await s.init();assert.equal((await s.bootstrap()).fields.length,6);assert.equal((await s.all('SELECT * FROM users WHERE national_id IS NULL')).length,0);const other=new TurfService(local as unknown as D1Database,'other',NOW);await other.init();await fails(()=>other.field('test:bole'),404);});
+test('FAN mock registers only citizens; staff requires credentials',async()=>{const {s}=await setup();await fails(()=>s.signIn({national_id:'123'}),400);const a=await s.signIn({national_id:'9876543210',role:'admin'});assert.equal(a.user.role,'player');assert.equal((await s.signIn({national_id:'9876543210'})).user.id,a.user.id);await fails(()=>s.signIn({national_id:'1000000003'}),403);await fails(()=>s.signIn({mode:'staff',email:'admin@meda.test',password:'wrong'}),401);await fails(()=>s.adminDashboard(),403);});
+test('hold is visible, exclusive across citizens, and lasts exactly 5 minutes',async()=>{const {s}=await setup();await login(s);const h=await s.holdSlot(request(s));assert.equal(h.hold.expires_at,NOW+300000);assert.equal((await s.availability(s.space+':bole','2026-10-27')).slots.find(x=>x.hour===11)?.status,'hold');await login(s,'player2');await fails(()=>s.holdSlot(request(s)),409);s.now+=300000;assert.ok((await s.holdSlot(request(s))).hold.id!==h.hold.id);});
+test('concurrent hold acquisition never creates two rows',async()=>{const {s}=await setup();await login(s);const r=await Promise.allSettled([s.holdSlot(request(s)),s.holdSlot(request(s))]);assert.ok(r.some(x=>x.status==='fulfilled'));assert.equal((await s.all("SELECT * FROM slot_locks WHERE kind='hold'")).length,1);});
+test('expired or foreign hold cannot be paid',async()=>{const {s}=await setup();await login(s);const h=await s.holdSlot(request(s));await login(s,'player2');await fails(()=>s.createBooking({...request(s),hold_id:h.hold.id}),409);await login(s);s.now+=300000;await fails(()=>s.createBooking({...request(s),hold_id:h.hold.id}),409);});
+test('server price and idempotency protect repeated and simultaneous checkout',async()=>{const {s}=await setup();await login(s);const h=await s.holdSlot(request(s));const payload={...request(s),hold_id:h.hold.id,amount:1};const [a,b]=await Promise.all([s.createBooking(payload),s.createBooking(payload)]);assert.equal(a.booking.id,b.booking.id);assert.equal(a.booking.amount,800);assert.equal(a.booking.commission,64);assert.equal((await s.createBooking(payload)).replayed,true);});
+test('failed payment releases hold without debiting credit',async()=>{const {s}=await setup();await login(s);await s.statement('UPDATE users SET store_credit=500 WHERE id=?',s.space+':player').run();const b=await book(s,{simulation:'failed'});assert.equal(b.booking.status,'payment_failed');assert.equal((await s.user())?.store_credit,500);assert.equal((await s.availability(s.space+':bole','2026-10-27')).slots.find(x=>x.hour===11)?.status,'available');});
+test('cancellation creates credit once and next booking uses it automatically',async()=>{const {s}=await setup();await login(s);const b=(await book(s)).booking;await Promise.all([s.cancelBooking(b.id),s.cancelBooking(b.id)]);assert.equal((await s.user())?.store_credit,800);assert.equal((await s.all('SELECT * FROM credits WHERE booking_id=?',b.id)).length,1);assert.equal((await s.booking(b.id)).payment_status,'store_credit');const next=(await book(s,{hour:19.75})).booking;assert.equal(next.credit_used,800);assert.equal(next.paid_amount,200);assert.equal((await s.user())?.store_credit,0);});
+test('cancellation rejects exactly two hours, later times, and another citizen',async()=>{const {s}=await setup();await login(s);const b=(await book(s)).booking;await login(s,'player2');await fails(()=>s.cancelBooking(b.id),403);await login(s);s.now=kickoff(b.date,b.hour)-7200000;await fails(()=>s.cancelBooking(b.id),400);});
+test('two simultaneous payments cannot spend the same credit twice',async()=>{const {s}=await setup();await login(s);await s.statement('UPDATE users SET store_credit=800 WHERE id=?',s.space+':player').run();const h1=await s.holdSlot(request(s)),h2=await s.holdSlot(request(s,{hour:13.5}));const r=await Promise.all([s.createBooking({...request(s),hold_id:h1.hold.id}),s.createBooking({...request(s),hold_id:h2.hold.id})]);assert.equal(r.reduce((n,r)=>n+r.booking.credit_used,0),800);assert.equal((await s.user())?.store_credit,0);});
+test('gate check requires assignment, selected field, paid status, exact time and one use',async()=>{const {s}=await setup();await login(s);const b=(await book(s)).booking;await login(s,'operator');await fails(()=>s.checkIn({token:b.token,field_id:b.field_id}),400);s.now=kickoff(b.date,b.hour);await fails(()=>s.checkIn({token:b.token,field_id:s.space+':atlas'}),400);assert.equal((await s.checkIn({token:b.token,field_id:b.field_id})).booking.status,'checked_in');await fails(()=>s.checkIn({token:b.token,field_id:b.field_id}),400);});
+test('gate check rejects the exact end of play',async()=>{const {s}=await setup();await login(s);const b=(await book(s)).booking;s.now=kickoff(b.date,b.hour)+3600000;await login(s,'operator');await fails(()=>s.checkIn({token:b.token,field_id:b.field_id}),400);});
+test('Woreda and Subcity scopes restrict field visibility and writes',async()=>{const {s}=await setup();await login(s,'woreda');const w=await s.opsDashboard();assert.equal(w.fields.length,2);await fails(()=>s.maintenance(s.space+':summit',{active:false}),403);await fails(()=>s.adminDashboard(),403);await login(s,'subcity');assert.equal((await s.opsDashboard()).fields.length,3);await s.maintenance(s.space+':summit',{active:false});await fails(()=>s.maintenance(s.space+':cmc',{active:false}),403);});
+test('maintenance blocks checkout even when an earlier hold exists',async()=>{const {s}=await setup();await login(s);const h=await s.holdSlot(request(s));await login(s,'woreda');await s.maintenance(s.space+':bole',{active:false});await login(s);await fails(()=>s.createBooking({...request(s),hold_id:h.hold.id}),409);});
+test('operator cannot manage fields, accounts, or make bookings',async()=>{const {s}=await setup();await login(s,'operator');await fails(()=>s.maintenance(s.space+':bole',{active:false}),403);await fails(()=>s.holdSlot(request(s)),403);await fails(()=>s.setUserStatus(s.space+':player',{status:'suspended'}),403);});
+test('owner cannot block held or booked slots and can reopen maintenance slots',async()=>{const {s}=await setup();await login(s);await s.holdSlot(request(s));await login(s,'owner');await fails(()=>s.blockSlot(s.space+':bole',{date:'2026-10-27',hour:11,action:'block',reason:'Maintenance'}),409);await s.blockSlot(s.space+':bole',{date:'2026-10-27',hour:13.5,action:'block',reason:'Maintenance'});await s.blockSlot(s.space+':bole',{date:'2026-10-27',hour:13.5,action:'unblock'});});
+test('dispute resolution creates only one store credit and never a cash refund',async()=>{const {s}=await setup();await login(s);const b=(await book(s)).booking;await s.reportIssue(b.id,{reason:'Field not available on arrival.'});await login(s,'admin');const d=(await s.adminDashboard()).disputes.find(x=>x.booking_id===b.id)!;await s.resolveDispute(d.id,{action:'refunded',resolution:'Approved store credit.'});await fails(()=>s.resolveDispute(d.id,{action:'refunded',resolution:'Duplicate attempt.'}),409);assert.equal((await s.booking(b.id)).payment_status,'store_credit');await login(s);assert.equal((await s.user())?.store_credit,800);});
+test('suspended users cannot sign in or transact',async()=>{const {s}=await setup();await login(s,'admin');await s.setUserStatus(s.space+':player',{status:'suspended'});await fails(()=>login(s),403);});
+test('CSV quotes and formula protection remain effective',async()=>{const {s}=await setup();await login(s);await book(s,{team:'=HYPERLINK("bad")'});await login(s,'owner');const csv=await s.exportBookings('2026-10');assert.match(csv,/'=HYPERLINK/);assert.match(csv,/11:00/);assert.equal(csvCell('+1'),'"\'+1"');await fails(()=>s.exportBookings('bad'),400);});

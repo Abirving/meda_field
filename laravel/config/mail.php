@@ -1,0 +1,2 @@
+<?php
+return ['default'=>env('MAIL_MAILER','log'),'mailers'=>['log'=>['transport'=>'log','channel'=>'single'],'smtp'=>['transport'=>'smtp','scheme'=>env('MAIL_SCHEME','smtp'),'host'=>env('MAIL_HOST'),'port'=>env('MAIL_PORT',587),'require_tls'=>true,'timeout'=>15,'username'=>env('MAIL_USERNAME'),'password'=>env('MAIL_PASSWORD')]],'from'=>['address'=>env('MAIL_FROM_ADDRESS','noreply@meda.test'),'name'=>'Meda Pass']];

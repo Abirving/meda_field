@@ -1,0 +1,1 @@
+<div class="schedule">@forelse($bookings as $b)<article><span class="badge">{{ $b->status }}</span><h3>{{ $b->start_time->timezone(config('meda.timezone'))->format('H:i') }} · {{ $b->team }}</h3><p>{{ $b->field->name }} · {{ $b->user->name }}</p></article>@empty<p>No bookings today.</p>@endforelse</div>

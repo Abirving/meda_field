@@ -1,0 +1,78 @@
+name: meda-pass
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile.production
+    target: app
+    args:
+      VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+      VITE_REVERB_HOST: ${MEDA_DOMAIN}
+  env_file: .env.production
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  volumes:
+    - app-storage:/app/storage
+    - app-cache:/app/bootstrap/cache
+    - ./secrets:/run/secrets:ro
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+services:
+  app:
+    <<: *app
+  queue:
+    <<: *app
+    command: [php, artisan, queue:work, --tries=3, --timeout=60, --max-time=3600]
+  scheduler:
+    <<: *app
+    command: [php, artisan, schedule:work]
+  reverb:
+    <<: *app
+    command: [php, artisan, reverb:start, --host=0.0.0.0, --port=8080]
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+      target: web
+      args:
+        VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+        VITE_REVERB_HOST: ${MEDA_DOMAIN}
+    environment:
+      MEDA_DOMAIN: ${MEDA_DOMAIN:?Set MEDA_DOMAIN}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes: [caddy-data:/data, caddy-config:/config]
+    restart: unless-stopped
+    depends_on: [app, reverb]
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    volumes: [database:/var/lib/postgresql/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command: ['sh', '-c', 'exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    volumes: [redis-data:/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  app-storage:
+  app-cache:
+  database:
+  redis-data:
+  caddy-data:
+  caddy-config:

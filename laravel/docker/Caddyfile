@@ -1,0 +1,24 @@
+{$MEDA_DOMAIN} {
+    encode zstd gzip
+    handle /app/* {
+        reverse_proxy reverb:8080
+    }
+    handle /apps/* {
+        reverse_proxy reverb:8080
+    }
+    handle {
+        root * /srv/public
+        php_fastcgi app:9000 {
+            root /app/public
+        }
+        file_server
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options SAMEORIGIN
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+    # Do not log query strings: identity codes and signed URLs can contain secrets.
+}

@@ -1,0 +1,1 @@
+CREATE DATABASE meda_test;

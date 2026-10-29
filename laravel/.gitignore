@@ -1,0 +1,16 @@
+/vendor/
+/node_modules/
+/public/build/
+/public/css/filament/
+/public/js/filament/
+/.env
+/.phpunit.cache/
+/storage/*.key
+/secrets/
+/deploy/backups/
+/storage/logs/*
+/storage/framework/cache/*
+/storage/framework/views/*
+/storage/framework/sessions/*
+/bootstrap/cache/*
+!**/.gitkeep

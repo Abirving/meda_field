@@ -1,0 +1,1 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meda Pass</title></head><body><main><h1>Bookings are not open yet.</h1><p>Meda Pass is completing launch preparations. Please check back later.</p></main></body></html>
